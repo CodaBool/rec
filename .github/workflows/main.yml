@@ -1,0 +1,63 @@
+name: main
+on:
+  schedule:
+    - cron: "0 10 * * 0" # Run weekly
+  push:
+    branches:
+      - main
+permissions:
+  contents: write # to push back to your repo
+  packages: write # to push to GHCR (with your PAT)
+jobs:
+  docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      # https://github.com/marketplace/actions/checkout
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Add upstream and merge
+        run: |
+          # Add upstream remote if it doesn't exist
+          git remote add upstream https://github.com/orhogi/streamerREC.git 2>/dev/null || true
+
+          # Fetch latest upstream
+          git fetch upstream main
+
+          git pull
+
+          # Merge upstream/main into local main
+          git merge upstream/main --no-edit || {
+            echo "Merge conflict detected. Resolve conflicts and commit manually."
+            exit 1
+          }
+
+          # Commit only if merge introduced changes
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Merge upstream/main into main"
+          else
+            echo "Already up to date with upstream/main"
+          fi
+
+      # https://github.com/marketplace/actions/docker-setup-docker
+      - uses: docker/setup-docker-action@v5
+      # login to github, build and push image
+      - name: Build and push image
+        run: |
+          docker build -t ghcr.io/codabool/rec:latest .
+          echo ${{ secrets.GH_TOKEN }} | docker login ghcr.io -u codabool --password-stdin
+          docker push ghcr.io/codabool/rec:latest
+      - name: Push updated main branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if ! git diff --quiet origin/main..HEAD; then
+            git push origin HEAD:main
+          else
+            echo "No new commits to push; main is up to date."
+          fi
